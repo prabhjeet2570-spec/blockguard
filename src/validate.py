@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from .models import (
@@ -5,6 +6,82 @@ from .models import (
     UpdateProperty, AppendBlock, UpdateBlockText, ArchiveBlock,
     ValidationResult, ValidationError, PageContext, BlockInfo,
 )
+
+CONJUNCTIVE_PATTERNS = [
+    r"\band\b",
+    r"\bthen\b",
+    r"\balso\b",
+    r"\bplus\b",
+    r"\bas well\b",
+]
+
+ACTION_VERBS = [
+    "set", "update", "change", "mark", "add", "append", "insert",
+    "remove", "delete", "archive", "check", "uncheck", "complete",
+    "move", "rename", "edit", "modify", "clear", "replace",
+    "create", "make",
+]
+
+
+def check_multi_intent(instruction: str) -> ValidationResult:
+    errors = []
+
+    has_conjunction = any(
+        re.search(p, instruction.lower())
+        for p in CONJUNCTIVE_PATTERNS
+    )
+
+    if not has_conjunction:
+        return ValidationResult(valid=True)
+
+    clauses = _split_conjunctive_clauses(instruction)
+
+    action_clauses = [c for c in clauses if _has_action_verb(c)]
+
+    shared_verb_clauses = [
+        c for c in clauses
+        if not _has_action_verb(c) and _starts_with_noun_phrase(c)
+    ]
+
+    if len(action_clauses) + len(shared_verb_clauses) > 1:
+        errors.append(ValidationError(
+            field="instruction",
+            message="multiple operations detected, please submit one edit at a time",
+        ))
+        return ValidationResult(valid=False, errors=errors)
+
+    if len(action_clauses) > 1:
+        errors.append(ValidationError(
+            field="instruction",
+            message="multiple operations detected, please submit one edit at a time",
+        ))
+        return ValidationResult(valid=False, errors=errors)
+
+    return ValidationResult(valid=True)
+
+
+def _split_conjunctive_clauses(instruction: str) -> list[str]:
+    text = instruction.lower().strip()
+    text = re.sub(r"[,;]+", " ", text)
+    parts = re.split(r"\s+(and|then)\s+", text)
+    result = []
+    for part in parts:
+        part = part.strip()
+        if part and part not in ("and", "then"):
+            result.append(part)
+    return result or [text]
+
+
+def _has_action_verb(clause: str) -> bool:
+    words = clause.split()
+    for verb in ACTION_VERBS:
+        if verb in words:
+            return True
+    return False
+
+
+def _starts_with_noun_phrase(clause: str) -> bool:
+    return bool(re.match(r"^\s*(?:a|an|the)\s+", clause))
 
 
 class Validator:
@@ -16,6 +93,10 @@ class Validator:
     ) -> ValidationResult:
         if isinstance(operation, (Clarify, Reject)):
             return ValidationResult(valid=True)
+
+        multi_intent_result = check_multi_intent(instruction)
+        if not multi_intent_result.valid:
+            return multi_intent_result
 
         errors = []
 
@@ -101,7 +182,6 @@ class Validator:
                     ))
 
         elif prop_type == "date":
-            import re
             ISO_DATE_RE = r"^\d{4}-\d{2}-\d{2}$"
             if not re.match(ISO_DATE_RE, property_value.strip()):
                 errors.append(ValidationError(
