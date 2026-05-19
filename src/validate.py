@@ -7,6 +7,8 @@ from .models import (
     ValidationResult, ValidationError, PageContext, BlockInfo,
 )
 
+DESTRUCTIVE_KEYWORDS = ["delete", "remove", "archive", "trash", "destroy"]
+
 CONJUNCTIVE_PATTERNS = [
     r"\band\b",
     r"\bthen\b",
@@ -116,6 +118,51 @@ class Validator:
     def _normalize_id(self, id_str: str) -> str:
         return id_str.replace("-", "")
 
+    def _normalize_select_value(
+        self,
+        property_name: str,
+        property_value: str,
+        page_context: PageContext,
+    ) -> str:
+        if property_name not in page_context.properties:
+            return property_value
+
+        prop_schema = page_context.properties[property_name]
+        prop_type = prop_schema if isinstance(prop_schema, str) else prop_schema.get("type", "")
+
+        if prop_type == "select":
+            options_raw = (
+                prop_schema.get("options", [])
+                if isinstance(prop_schema, dict) else []
+            )
+            if options_raw:
+                value_lower = property_value.lower().strip()
+                for opt in options_raw:
+                    if opt.lower().strip() == value_lower:
+                        return opt
+
+        return property_value
+
+    def _check_destructive_action(
+        self, operation: AgentResult, instruction: str
+    ) -> list[ValidationError]:
+        errors = []
+        instruction_lower = instruction.lower()
+        has_keyword = any(kw in instruction_lower for kw in DESTRUCTIVE_KEYWORDS)
+
+        is_destructive_op = isinstance(operation, ArchiveBlock)
+
+        if is_destructive_op and not has_keyword:
+            errors.append(ValidationError(
+                field="operation",
+                message=(
+                    "Destructive operation requires explicit keyword like "
+                    "'delete', 'remove', or 'archive' in the instruction"
+                ),
+            ))
+
+        return errors
+
     def _find_block_by_id(
         self, block_id: str, blocks: list[BlockInfo], normalized: bool = False
     ) -> Optional[BlockInfo]:
@@ -197,8 +244,16 @@ class Validator:
     def _validate_update_property(
         self, op: UpdateProperty, ctx: PageContext, instruction: str
     ) -> list[ValidationError]:
+        errors = []
+
+        normalized = self._normalize_select_value(op.property_name, op.property_value, ctx)
+        if normalized != op.property_value:
+            op.property_value = normalized
+
         schema_errors = self._check_schema(op.property_name, op.property_value, ctx)
-        return schema_errors
+        errors.extend(schema_errors)
+
+        return errors
 
     def _validate_append_block(
         self, op: AppendBlock, ctx: PageContext, instruction: str
@@ -226,6 +281,9 @@ class Validator:
                 message="Block content cannot be empty",
             ))
 
+        dest_errors = self._check_destructive_action(operation=op, instruction=instruction)
+        errors.extend(dest_errors)
+
         return errors
 
     def _validate_update_block_text(
@@ -243,6 +301,9 @@ class Validator:
                 message="Block text cannot be empty",
             ))
 
+        dest_errors = self._check_destructive_action(operation=op, instruction=instruction)
+        errors.extend(dest_errors)
+
         return errors
 
     def _validate_archive_block(
@@ -253,5 +314,8 @@ class Validator:
         block_err = self._check_block_exists(op.block_id, ctx)
         if block_err:
             errors.append(block_err)
+
+        dest_errors = self._check_destructive_action(operation=op, instruction=instruction)
+        errors.extend(dest_errors)
 
         return errors
