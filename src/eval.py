@@ -11,6 +11,7 @@ from .models import (
 )
 from .agent import Agent
 from .validate import Validator
+from .notion_client import MockNotionClient
 
 
 class EvalRunner:
@@ -78,14 +79,24 @@ class EvalRunner:
 
         all_needed_refs = self._collect_page_refs(instructions)
 
-        mock = MockNotionClient()
-        page_context_map: dict[str, PageContext] = {}
-        for ref in all_needed_refs:
-            pdef = pages_def.get(ref)
-            if pdef:
-                ctx = self._build_mock_context(pdef, ref)
-                page_context_map[ref] = ctx
-                mock.register_page(pdef.get("id", ref), ctx)
+        if live and page_id_map:
+            from .notion_client import NotionClientWrapper
+            notion = NotionClientWrapper()
+            page_context_map: dict[str, PageContext] = {}
+            for ref in all_needed_refs:
+                real_id = page_id_map.get(ref)
+                if real_id:
+                    page_context_map[ref] = notion.extract_page_context(real_id)
+        else:
+            mock = MockNotionClient()
+            page_context_map = {}
+            for ref in all_needed_refs:
+                pdef = pages_def.get(ref)
+                if pdef:
+                    ctx = self._build_mock_context(pdef, ref)
+                    page_context_map[ref] = ctx
+                    mock.register_page(pdef.get("id", ref), ctx)
+            notion = mock
 
         results = []
         latencies = []
@@ -114,16 +125,28 @@ class EvalRunner:
                 refs_to_use = []
 
             if refs_to_use:
-                resolved = []
-                for ref in refs_to_use:
-                    ctx = page_context_map.get(ref)
-                    if ctx:
-                        resolved.append(ctx)
-                    else:
-                        pdef = pages_def.get(ref)
-                        if pdef:
-                            resolved.append(self._build_mock_context(pdef, ref))
-                page_context = self._merge_page_contexts(resolved)
+                if live and page_id_map:
+                    resolved = []
+                    for ref in refs_to_use:
+                        ctx = page_context_map.get(ref)
+                        if ctx:
+                            resolved.append(ctx)
+                        else:
+                            real_id = page_id_map.get(ref, ref)
+                            ctx = notion.extract_page_context(real_id)
+                            resolved.append(ctx)
+                    page_context = self._merge_page_contexts(resolved)
+                else:
+                    resolved = []
+                    for ref in refs_to_use:
+                        ctx = page_context_map.get(ref)
+                        if ctx:
+                            resolved.append(ctx)
+                        else:
+                            pdef = pages_def.get(ref)
+                            if pdef:
+                                resolved.append(self._build_mock_context(pdef, ref))
+                    page_context = self._merge_page_contexts(resolved)
             else:
                 page_context = self._default_context()
 
@@ -300,53 +323,37 @@ class EvalRunner:
             return int(sorted_data[int(k)])
         return int(sorted_data[f] * (c - k) + sorted_data[c] * (k - f))
 
+    @staticmethod
+    def print_report(report: dict):
+        print(f"\n{'='*50}")
+        print(f"Eval Report — v{report['version']}")
+        if report.get("tag"):
+            print(f"Tag: {report['tag']}")
+        print(f"{'='*50}")
+        print(f"Total instructions:      {report['total_instructions']}")
+        print(f"Accuracy:               {report['accuracy']:.4f}")
+        print(f"Refusal precision:      {report['refusal_precision']:.4f}")
+        print(f"Refusal recall:         {report['refusal_recall']:.4f}")
+        print(f"False accept rate:      {report['false_accept_rate']:.4f}")
+        print(f"Avg latency:            {report['avg_latency_ms']} ms")
+        print(f"P95 latency:            {report['p95_latency_ms']} ms")
+        print(f"Total cost:             ${report['total_cost_usd']:.4f}")
+        print(f"{'='*50}\n")
 
-class MockNotionClient:
-    def __init__(self, pages: Optional[dict] = None):
-        self.pages = pages or {}
+        for r in report.get("results", []):
+            ex_type = r.get("expected_type", "")
+            outcome = r.get("outcome", "")
+            if ex_type in ("update_property", "append_block", "update_block_text"):
+                marker = "✓" if r.get("correct") else "✗"
+            elif ex_type in ("clarify", "reject"):
+                marker = "✓" if outcome in ("clarified", "rejected") else "✗"
+            else:
+                marker = "?"
+            print(
+                f"  [{marker}] {r['id']:20s} | "
+                f"exp={ex_type:20s} | act={r['actual_type']:20s} | "
+                f"out={outcome:10s} | {'OK' if r['validation_passed'] else 'BLOCKED'}"
+            )
+            if r.get("validation_reason"):
+                print(f"       └─ {r['validation_reason']}")
 
-    def register_page(self, page_id: str, page_context: PageContext):
-        self.pages[page_id] = page_context
-
-    def extract_page_context(self, page_id: str) -> PageContext:
-        if page_id not in self.pages:
-            raise ValueError(f"Unknown page: {page_id}")
-        return self.pages[page_id]
-
-    def extract_block_tree(self, block_id: str) -> list[BlockInfo]:
-        for page_id, ctx in self.pages.items():
-            for block in ctx.blocks:
-                found = self._find_block(block, block_id)
-                if found:
-                    return found.children if found.id == block_id else [found]
-            for block in ctx.blocks:
-                found = self._find_block(block, block_id)
-                if found is not None:
-                    subtree = self._collect_subtree(found)
-                    return subtree
-        raise ValueError(f"Unknown block: {block_id}")
-
-    def _find_block(self, block: BlockInfo, block_id: str) -> Optional[BlockInfo]:
-        if block.id == block_id:
-            return block
-        for child in block.children:
-            found = self._find_block(child, block_id)
-            if found:
-                return found
-        return None
-
-    def _collect_subtree(self, block: BlockInfo) -> list[BlockInfo]:
-        result = []
-        for child in block.children:
-            result.append(child)
-            result.extend(self._collect_subtree(child))
-        return result
-
-    def update_block(self, block_id: str, properties: dict) -> dict:
-        return {"id": block_id, "object": "block", "type": "updated"}
-
-    def append_block_children(self, block_id: str, children: list[dict]) -> dict:
-        return {"id": block_id, "object": "block", "type": "appended", "children": children}
-
-    def update_page_property(self, page_id: str, properties: dict) -> dict:
-        return {"id": page_id, "object": "page", "properties": properties}
