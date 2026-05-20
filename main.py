@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from src.models import Clarify, Reject, UpdateProperty, AppendBlock, UpdateBlockText, ArchiveBlock
 from src.notion_client import NotionClientWrapper, build_notion_block
 from src.agent import Agent
-from src.validate import Validator
+from src.validate import Validator, check_multi_intent
 from src.storage import Storage
 from src.eval import EvalRunner
 
@@ -45,6 +45,22 @@ def cmd_apply(args):
 
     page_context = notion.extract_page_context(page_id)
 
+    multi_intent_result = check_multi_intent(instruction)
+    if not multi_intent_result.valid:
+        reason = multi_intent_result.errors[0].message
+        print(f"Rejected: {reason}")
+        storage.log_edit(
+            instruction=instruction,
+            proposed_operation=None,
+            validation_passed=False,
+            validation_reason=reason,
+            outcome="rejected",
+            validation_enabled=True,
+            latency_ms=0,
+            model=agent.model,
+        )
+        return
+
     start = time.monotonic()
     agent_result = agent.process(instruction, page_context)
     latency_ms = int((time.monotonic() - start) * 1000)
@@ -76,6 +92,66 @@ def cmd_apply(args):
             model=agent.model,
         )
         return
+
+    validation = validator.validate(agent_result, page_context, instruction)
+
+    if not validation.valid:
+        print(f"Validation failed ({len(validation.errors)} error(s)):")
+        for err in validation.errors:
+            print(f"  - {err.field}: {err.message}")
+
+        print("\nRetrying with validation feedback...")
+        retry_start = time.monotonic()
+        agent_result = agent.process(
+            instruction, page_context,
+            retry_error=validation.errors[0].message,
+        )
+        retry_latency = int((time.monotonic() - retry_start) * 1000)
+
+        if isinstance(agent_result, Clarify):
+            print(f"After retry, clarification requested: {agent_result.reason}")
+            storage.log_edit(
+                instruction=instruction,
+                proposed_operation=agent_result.model_dump(),
+                validation_passed=True,
+                outcome="clarified",
+                validation_enabled=True,
+                latency_ms=latency_ms + retry_latency,
+                model=agent.model,
+            )
+            return
+
+        if isinstance(agent_result, Reject):
+            print(f"After retry, rejected: {agent_result.reason}")
+            storage.log_edit(
+                instruction=instruction,
+                proposed_operation=agent_result.model_dump(),
+                validation_passed=False,
+                validation_reason=agent_result.reason,
+                outcome="rejected",
+                validation_enabled=True,
+                latency_ms=latency_ms + retry_latency,
+                model=agent.model,
+            )
+            return
+
+        validation = validator.validate(agent_result, page_context, instruction)
+        if not validation.valid:
+            print(f"Retry also failed ({len(validation.errors)} error(s)):")
+            for err in validation.errors:
+                print(f"  - {err.field}: {err.message}")
+            print("Edit rejected.")
+            storage.log_edit(
+                instruction=instruction,
+                proposed_operation=agent_result.model_dump() if hasattr(agent_result, "model_dump") else None,
+                validation_passed=False,
+                validation_reason="; ".join(e.message for e in validation.errors),
+                outcome="rejected",
+                validation_enabled=True,
+                latency_ms=latency_ms + retry_latency,
+                model=agent.model,
+            )
+            return
 
     applied = _apply_operation(notion, agent_result, page_context)
     if applied:
