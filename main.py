@@ -162,17 +162,151 @@ def cmd_log(args):
 
 def cmd_eval(args):
     load_dotenv()
-    print("Eval command not yet implemented.")
+
+    if args.report:
+        storage = Storage()
+        runs = storage.get_eval_runs(tag=args.tag)
+        if not runs:
+            print("No eval runs found.")
+            return
+        for run in runs:
+            print(f"\nEval run — v{run.get('eval_set_version', '?')} (tag: {run.get('tag', 'none')})")
+            print(f"  Accuracy:          {run.get('accuracy', 'N/A')}")
+            print(f"  Refusal precision: {run.get('refusal_precision', 'N/A')}")
+            print(f"  Refusal recall:    {run.get('refusal_recall', 'N/A')}")
+            print(f"  False accept rate: {run.get('false_accept_rate', 'N/A')}")
+            print(f"  Avg latency:       {run.get('avg_latency_ms', 'N/A')} ms")
+            print(f"  P95 latency:       {run.get('p95_latency_ms', 'N/A')} ms")
+            print(f"  Total cost:        ${run.get('total_cost_usd', 0):.4f}")
+        return
+
+    if not args.eval_set:
+        print("Error: --set is required to run eval (or use --report to view past runs)")
+        sys.exit(1)
+
+    with open(args.eval_set) as f:
+        eval_set = json.load(f)
+
+    page_id_map = None
+    if args.page_id_map:
+        with open(args.page_id_map) as f:
+            page_id_map = json.load(f)
+
+    agent = Agent()
+    validator = Validator()
+    storage = Storage()
+
+    runner = EvalRunner(agent, validator, storage)
+    report = runner.run(
+        eval_set,
+        tag=args.tag,
+        skip_validation=args.no_validate,
+        live=args.live,
+        page_id_map=page_id_map,
+    )
+    EvalRunner.print_report(report)
 
 
 def cmd_compare(args):
     load_dotenv()
-    print("Compare command not yet implemented.")
+    storage = Storage()
+    run_a = storage.get_eval_runs(tag=args.tag_a)
+    run_b = storage.get_eval_runs(tag=args.tag_b)
+
+    if not run_a or not run_b:
+        print("One or both tags not found.")
+        return
+
+    a = run_a[-1]
+    b = run_b[-1]
+
+    print(f"\n{'='*60}")
+    print(f"{'Metric':25s} {'A':15s} {'B':15s}")
+    print(f"{'-'*60}")
+    metrics = [
+        "accuracy", "refusal_precision", "refusal_recall",
+        "false_accept_rate", "avg_latency_ms", "p95_latency_ms", "total_cost_usd",
+    ]
+    for m in metrics:
+        va = a.get(m, 0) or 0
+        vb = b.get(m, 0) or 0
+        diff = vb - va
+        if isinstance(va, float):
+            diff_str = f"(Δ {diff:+.4f})"
+        else:
+            diff_str = f"(Δ {diff:+.4f})"
+        print(f"{m:25s} {va!r:>15} {vb!r:>15} {diff_str}")
+    print(f"{'='*60}\n")
 
 
 def cmd_reset_workspace(args):
     load_dotenv()
-    print("Reset workspace command not yet implemented.")
+    if not args.eval_set or not args.page_id_map:
+        print("Usage: python main.py reset-workspace --eval-set <path> --page-id-map <path>")
+        return
+
+    with open(args.eval_set) as f:
+        eval_set = json.load(f)
+    with open(args.page_id_map) as f:
+        page_id_map = json.load(f)
+
+    notion = NotionClientWrapper()
+    pages_def = eval_set.get("pages", {})
+
+    for ref, seed_page in pages_def.items():
+        real_id = page_id_map.get(ref)
+        if not real_id:
+            print(f"  Skipping {ref}: no mapping in page-id-map")
+            continue
+
+        page_type = seed_page.get("type", "page")
+        print(f"Resetting {ref} ({page_type})...")
+
+        if page_type == "database":
+            data_sources = seed_page.get("data_sources", [])
+            ds_id = None
+            if data_sources:
+                ds_id = data_sources[0].get("id")
+            if not ds_id:
+                db_resp = notion._get(f"/databases/{real_id}")
+                dss = db_resp.get("data_sources", [])
+                if dss:
+                    ds_id = dss[0].get("id")
+            if not ds_id:
+                print(f"  Skipping database {ref}: no data source ID found")
+                continue
+            rows = notion.query_data_source(ds_id)
+            seed_entries = {b["text"].split("|")[0].strip(): b for b in seed_page.get("blocks", []) if b["type"] == "child_database_entry"}
+            for row in rows:
+                row_id = row["id"]
+                row_props = row.get("properties", {})
+                row_title = ""
+                for k, v in row_props.items():
+                    if v.get("type") == "title":
+                        row_title = "".join(t.get("plain_text", "") for t in v.get("title", []))
+                if row_title in seed_entries:
+                    seed_entry = seed_entries[row_title]
+                    seed_text = seed_entry.get("text", "")
+                    seed_props_str = seed_text.split("|", 1)[-1].strip() if "|" in seed_text else "{}"
+                    try:
+                        seed_props = eval(seed_props_str)
+                    except Exception:
+                        continue
+                    update = {}
+                    for prop_name, prop_val in seed_props.items():
+                        if prop_name in row_props:
+                            prop_type = row_props[prop_name].get("type", "")
+                            pv = notion.build_property_value(prop_type, str(prop_val) if prop_val is not None else "")
+                            if pv is not None:
+                                update[prop_name] = pv
+                    if update:
+                        notion.update_page_property(row_id, update)
+                        print(f"    Updated entry '{row_title}': {update}")
+        else:
+            notion.reset_page_from_seed(real_id, seed_page.get("blocks", []))
+            print(f"    Recreated page blocks")
+
+    print("Done. Workspace reset to seed state.")
 
 
 def main():

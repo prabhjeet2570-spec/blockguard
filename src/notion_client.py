@@ -249,7 +249,45 @@ class NotionClientWrapper:
             except ValueError:
                 return {"number": 0}
         elif prop_type == "rich_text":
+            return {"rich_text": [{"text": {"content": value}}]}
+        elif prop_type == "title":
+            return {"title": [{"text": {"content": value}}]}
+        elif prop_type == "url":
+            return {"url": value}
+        elif prop_type == "email":
+            return {"email": value}
+        elif prop_type == "phone_number":
+            return {"phone_number": value}
         return {"rich_text": [{"text": {"content": value}}]}
+
+    def reset_page_from_seed(self, page_id: str, seed_blocks: list[dict]):
+        existing = self.get_block_children(page_id)
+        for b in existing:
+            self._archive_block_tree(b["id"])
+        flat = self._flatten_seed_blocks(seed_blocks)
+        if flat:
+            self.append_block_children(page_id, flat)
+
+    def _flatten_seed_blocks(self, seed_blocks: list[dict]) -> list[dict]:
+        result = []
+        for sb in seed_blocks:
+            result.append(build_notion_block(sb["type"], sb.get("text", "")))
+            for child in sb.get("children", []):
+                result.append(build_notion_block(child["type"], child.get("text", "")))
+        return result
+
+    def _archive_block_tree(self, block_id: str):
+        try:
+            children = self.get_block_children(block_id)
+            for c in children:
+                if c.get("has_children"):
+                    self._archive_block_tree(c["id"])
+        except Exception:
+            pass
+        try:
+            self.delete_block(block_id)
+        except Exception:
+            pass
 
 
 class MockNotionClient:
@@ -301,12 +339,3 @@ class MockNotionClient:
 
     def update_page_property(self, page_id: str, properties: dict) -> dict:
         return {"id": page_id, "object": "page", "properties": properties}
-        elif prop_type == "title":
-            return {"title": [{"text": {"content": value}}]}
-        elif prop_type == "url":
-            return {"url": value}
-        elif prop_type == "email":
-            return {"email": value}
-        elif prop_type == "phone_number":
-            return {"phone_number": value}
-        return {"rich_text": [{"text": {"content": value}}]}
