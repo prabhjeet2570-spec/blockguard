@@ -163,3 +163,20 @@ class Storage:
             else:
                 cur.execute("SELECT * FROM eval_runs ORDER BY created_at")
             return cur.fetchall()
+
+    def get_stats(self) -> dict:
+        conn = self.connect()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT COUNT(*) as total FROM edit_log")
+            log_count = cur.fetchone()["total"]
+            cur.execute("SELECT COUNT(*) as total FROM eval_runs")
+            run_count = cur.fetchone()["total"]
+            cur.execute(
+                "SELECT outcome, COUNT(*) as cnt FROM edit_log GROUP BY outcome"
+            )
+            outcomes = {r["outcome"]: r["cnt"] for r in cur.fetchall()}
+        return {
+            "total_edits": log_count,
+            "total_eval_runs": run_count,
+            "outcomes": outcomes,
+        }
