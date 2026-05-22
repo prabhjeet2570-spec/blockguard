@@ -9,6 +9,12 @@ from .models import (
 
 DESTRUCTIVE_KEYWORDS = ["delete", "remove", "archive", "trash", "destroy"]
 
+ALLOWED_BLOCK_TYPES = {
+    "paragraph", "to_do", "callout",
+    "bulleted_list_item", "numbered_list_item",
+    "heading_1", "heading_2", "heading_3",
+}
+
 CONJUNCTIVE_PATTERNS = [
     r"\band\b",
     r"\bthen\b",
@@ -264,15 +270,10 @@ class Validator:
         if block_err:
             errors.append(block_err)
 
-        allowed_types = {
-            "paragraph", "to_do", "callout",
-            "bulleted_list_item", "numbered_list_item",
-            "heading_1", "heading_2", "heading_3",
-        }
-        if op.block_type not in allowed_types:
+        if op.block_type not in ALLOWED_BLOCK_TYPES:
             errors.append(ValidationError(
                 field="block_type",
-                message=f"Invalid block type '{op.block_type}'. Allowed: {sorted(allowed_types)}",
+                message=f"Invalid block type '{op.block_type}'. Allowed: {sorted(ALLOWED_BLOCK_TYPES)}",
             ))
 
         if not op.content.strip():
