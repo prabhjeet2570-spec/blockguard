@@ -33,6 +33,26 @@ def cmd_setup(args):
         print("Check your NOTION_TOKEN in .env")
 
 
+def cmd_status(args):
+    load_dotenv()
+    storage = Storage()
+    try:
+        stats = storage.get_stats()
+        print(f"Database: connected ({stats['total_edits']} edits, {stats['total_eval_runs']} eval runs)")
+        if stats["outcomes"]:
+            print(f"  Outcomes: {stats['outcomes']}")
+    except Exception as e:
+        print(f"Database: disconnected — {e}")
+
+    try:
+        notion = NotionClientWrapper()
+        me = notion._get("/users/me")
+        name = me.get("name", "unknown")
+        print(f"Notion: connected — authenticated as {name}")
+    except Exception as e:
+        print(f"Notion: disconnected — {e}")
+
+
 def cmd_apply(args):
     load_dotenv()
     instruction = " ".join(args.instruction)
@@ -393,6 +413,9 @@ def main():
 
     p_setup = sub.add_parser("setup", help="Create database tables and verify connections")
     p_setup.set_defaults(func=cmd_setup)
+
+    p_status = sub.add_parser("status", help="Show database and Notion connection status")
+    p_status.set_defaults(func=cmd_status)
 
     p_apply = sub.add_parser("apply", help="Apply a natural language instruction to a Notion page")
     p_apply.add_argument("instruction", nargs="+", help="Natural language instruction")
