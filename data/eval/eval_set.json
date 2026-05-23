@@ -75,27 +75,20 @@
     { "id": "e04", "category": "near_ambiguous", "instruction": "Add a note to the Q3 page", "expected": { "type": "clarify", "page_refs": ["meeting_notes", "project_tracker"] } },
     { "id": "e05", "category": "near_ambiguous", "instruction": "Update the tracker entry's due date", "expected": { "type": "clarify", "page_ref": "project_tracker" } },
     { "id": "e06", "category": "near_ambiguous", "instruction": "Update the action item to reflect completion", "expected": { "type": "clarify", "page_ref": "meeting_notes" } },
-
     { "id": "e07", "category": "coreference_no_antecedent", "instruction": "Mark it as done", "expected": { "type": "clarify", "page_ref": "meeting_notes" } },
     { "id": "e08", "category": "coreference_no_antecedent", "instruction": "Change that one's owner to Bob", "expected": { "type": "clarify", "page_ref": "project_tracker" } },
     { "id": "e09", "category": "coreference_no_antecedent", "instruction": "Set its status to Done", "expected": { "type": "clarify", "page_ref": "project_tracker" } },
     { "id": "e10", "category": "coreference_no_antecedent", "instruction": "Add a note under it", "expected": { "type": "clarify", "page_ref": "sprint_planning" } },
     { "id": "e11", "category": "coreference_no_antecedent", "instruction": "Update that page", "expected": { "type": "clarify", "page_ref": "meeting_notes" } },
-
     { "id": "e12", "category": "schema_adjacent_invalid", "instruction": "Set Q3 Planning's status to Completed", "expected": { "type": "reject", "page_ref": "project_tracker" } },
     { "id": "e13", "category": "schema_adjacent_invalid", "instruction": "Update the Sprint Backlog task about redesigning the homepage", "expected": { "type": "reject", "page_ref": "sprint_planning" } },
     { "id": "e14", "category": "schema_adjacent_invalid", "instruction": "Set the priority of Q3 Planning to High", "expected": { "type": "reject", "page_ref": "project_tracker" } },
     { "id": "e15", "category": "schema_adjacent_invalid", "instruction": "Update the Sprint Velocity property on Q3 Planning to 10", "expected": { "type": "reject", "page_ref": "project_tracker" } },
     { "id": "e16", "category": "schema_adjacent_invalid", "instruction": "Set Q4 Planning's status to Blocked", "expected": { "type": "reject", "page_ref": "project_tracker" } },
     { "id": "e17", "category": "schema_adjacent_invalid", "instruction": "Set Q3 Planning's due date to next quarter", "expected": { "type": "reject", "page_ref": "project_tracker" } },
-
-    { "id": "e18", "category": "case_or_format_variance", "instruction": "Set Q3 Planning's status to in progress",
-      "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "In Progress" } },
-    { "id": "e19", "category": "case_or_format_variance", "instruction": "Set Q4 Planning's status to DONE",
-      "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "Done" } },
-    { "id": "e20", "category": "case_or_format_variance", "instruction": "Set   Q3 Planning's   status  to   Not Started",
-      "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "Not Started" } },
-
+    { "id": "e18", "category": "case_or_format_variance", "instruction": "Set Q3 Planning's status to in progress", "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "In Progress" } },
+    { "id": "e19", "category": "case_or_format_variance", "instruction": "Set Q4 Planning's status to DONE", "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "Done" } },
+    { "id": "e20", "category": "case_or_format_variance", "instruction": "Set   Q3 Planning's   status  to   Not Started", "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "Not Started" } },
     { "id": "e21", "category": "compound", "instruction": "Mark Q3 Planning as done and set the owner to Bob", "expected": { "type": "reject", "page_ref": "project_tracker" } },
     { "id": "e22", "category": "compound", "instruction": "Add a to-do under Sprint Backlog and mark Q4 Planning as In Progress", "expected": { "type": "reject", "page_refs": ["sprint_planning", "project_tracker"] } },
     { "id": "e23", "category": "compound", "instruction": "Set Q3 Planning status to Done and change the owner to Alice", "expected": { "type": "reject", "page_ref": "project_tracker" } },
@@ -105,6 +98,9 @@
     { "id": "e27", "category": "compound", "instruction": "Mark Q3 Planning as done, set its owner to Alice, and add a note about the deadline under Sprint Backlog", "expected": { "type": "reject", "page_refs": ["project_tracker", "sprint_planning"] } },
     { "id": "e28", "category": "compound", "instruction": "Change the Q3 Kickoff paragraph text and update Q3 Planning status to Done", "expected": { "type": "reject", "page_refs": ["meeting_notes", "project_tracker"] } },
     { "id": "e29", "category": "compound", "instruction": "Set Q3 Planning status to Done and mark the nonexistent task as complete", "expected": { "type": "reject", "page_ref": "project_tracker" } },
-    { "id": "e30", "category": "compound", "instruction": "Append a bullet under Action Items saying done and check off Bob to set up staging", "expected": { "type": "reject", "page_ref": "meeting_notes" } }
+    { "id": "e30", "category": "compound", "instruction": "Append a bullet under Action Items saying done and check off Bob to set up staging", "expected": { "type": "reject", "page_ref": "meeting_notes" } },
+
+    { "id": "e31", "category": "test_precision", "instruction": "Add a bullet saying Review and complete it under Sprint Backlog", "expected": { "type": "append_block", "page_ref": "sprint_planning", "operation": "append_block", "parent_block_id": "sprint-h2-backlog", "block_type": "bulleted_list_item", "content": "Review and complete it" } },
+    { "id": "e32", "category": "test_precision", "instruction": "Please could you set the Status of Q3 Planning to indicate it is Done", "expected": { "type": "update_property", "page_ref": "project_tracker", "operation": "update_property", "property_name": "Status", "property_value": "Done" } }
   ]
 }

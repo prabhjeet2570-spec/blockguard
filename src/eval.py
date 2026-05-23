@@ -1,17 +1,14 @@
-import json
 import math
-import os
 import time
 from typing import Any, Optional
 
 from .models import (
     AgentResult, Clarify, Reject,
-    UpdateProperty, AppendBlock, UpdateBlockText,
-    PageContext, BlockInfo, ValidationResult,
+    PageContext, BlockInfo,
 )
 from .agent import Agent
-from .validate import Validator
 from .notion_client import MockNotionClient
+from .validate import Validator
 
 
 class EvalRunner:
@@ -80,7 +77,6 @@ class EvalRunner:
         all_needed_refs = self._collect_page_refs(instructions)
 
         if live and page_id_map:
-            from .notion_client import NotionClientWrapper
             notion = NotionClientWrapper()
             page_context_map: dict[str, PageContext] = {}
             for ref in all_needed_refs:
@@ -125,28 +121,23 @@ class EvalRunner:
                 refs_to_use = []
 
             if refs_to_use:
-                if live and page_id_map:
-                    resolved = []
-                    for ref in refs_to_use:
-                        ctx = page_context_map.get(ref)
-                        if ctx:
-                            resolved.append(ctx)
-                        else:
+                resolved = []
+                for ref in refs_to_use:
+                    ctx = page_context_map.get(ref)
+                    if ctx:
+                        resolved.append(ctx)
+                    else:
+                        if live and page_id_map:
                             real_id = page_id_map.get(ref, ref)
                             ctx = notion.extract_page_context(real_id)
-                            resolved.append(ctx)
-                    page_context = self._merge_page_contexts(resolved)
-                else:
-                    resolved = []
-                    for ref in refs_to_use:
-                        ctx = page_context_map.get(ref)
-                        if ctx:
-                            resolved.append(ctx)
                         else:
                             pdef = pages_def.get(ref)
                             if pdef:
-                                resolved.append(self._build_mock_context(pdef, ref))
-                    page_context = self._merge_page_contexts(resolved)
+                                ctx = self._build_mock_context(pdef, ref)
+                            else:
+                                continue
+                        resolved.append(ctx)
+                page_context = self._merge_page_contexts(resolved)
             else:
                 page_context = self._default_context()
 
@@ -322,38 +313,3 @@ class EvalRunner:
         if f == c:
             return int(sorted_data[int(k)])
         return int(sorted_data[f] * (c - k) + sorted_data[c] * (k - f))
-
-    @staticmethod
-    def print_report(report: dict):
-        print(f"\n{'='*50}")
-        print(f"Eval Report — v{report['version']}")
-        if report.get("tag"):
-            print(f"Tag: {report['tag']}")
-        print(f"{'='*50}")
-        print(f"Total instructions:      {report['total_instructions']}")
-        print(f"Accuracy:               {report['accuracy']:.4f}")
-        print(f"Refusal precision:      {report['refusal_precision']:.4f}")
-        print(f"Refusal recall:         {report['refusal_recall']:.4f}")
-        print(f"False accept rate:      {report['false_accept_rate']:.4f}")
-        print(f"Avg latency:            {report['avg_latency_ms']} ms")
-        print(f"P95 latency:            {report['p95_latency_ms']} ms")
-        print(f"Total cost:             ${report['total_cost_usd']:.4f}")
-        print(f"{'='*50}\n")
-
-        for r in report.get("results", []):
-            ex_type = r.get("expected_type", "")
-            outcome = r.get("outcome", "")
-            if ex_type in ("update_property", "append_block", "update_block_text"):
-                marker = "✓" if r.get("correct") else "✗"
-            elif ex_type in ("clarify", "reject"):
-                marker = "✓" if outcome in ("clarified", "rejected") else "✗"
-            else:
-                marker = "?"
-            print(
-                f"  [{marker}] {r['id']:20s} | "
-                f"exp={ex_type:20s} | act={r['actual_type']:20s} | "
-                f"out={outcome:10s} | {'OK' if r['validation_passed'] else 'BLOCKED'}"
-            )
-            if r.get("validation_reason"):
-                print(f"       └─ {r['validation_reason']}")
-
