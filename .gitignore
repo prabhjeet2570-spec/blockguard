@@ -8,3 +8,6 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
+data/eval/report_*.json
+*.md
+!README.md
